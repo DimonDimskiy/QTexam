@@ -1,7 +1,8 @@
 import psutil
 import platform
 import time
-import Py
+
+import win32com.client
 from PySide6 import QtWidgets, QtCore
 
 
@@ -18,6 +19,8 @@ class Window(QtWidgets.QWidget):
         self.systemInfoTread.systemInfoReceived.connect(self.updateSystemInfo)
         self.processInfoThread.processInfoReceived.connect(self.updateProcessInfo)
         self.serviceInfoThread.serviceInfoReceived.connect(self.updateServiceInfo)
+        self.spinBox.valueChanged.connect(self.onSpinBoxValueChanged)
+        # self.taskInfoThread.taskInfoReceived.connect(self.updateTaskInfo)
 
     def initThreads(self):
         self.systemInfoTread = SystemViewerTread()
@@ -26,6 +29,8 @@ class Window(QtWidgets.QWidget):
         self.processInfoThread.start()
         self.serviceInfoThread = ServiceInfoThread()
         self.serviceInfoThread.start()
+        self.taskInfoThread = TaskInfoThread()
+        self.taskInfoThread.start()
 
     def initUi(self):
         """
@@ -45,11 +50,20 @@ class Window(QtWidgets.QWidget):
         self.tabWidget.addTab(self.servisePlaintextedit, 'Службы')
         self.tabWidget.addTab(self.tasksPlaintextEdit, 'Задачи')
 
+        self.spinBoxLabel = QtWidgets.QLabel("Чатсота обновления")
+        self.spinBox = QtWidgets.QSpinBox()
+        self.spinBox.setRange(1, 30)
+
+        spinboxLayout = QtWidgets.QHBoxLayout()
+        spinboxLayout.addWidget(self.spinBoxLabel)
+        spinboxLayout.addWidget(self.spinBox)
 
         mainLayout = QtWidgets.QVBoxLayout()
         mainLayout.addWidget(self.tabWidget)
+        mainLayout.addLayout(spinboxLayout)
 
         self.setLayout(mainLayout)
+        self.setMinimumSize(500, 400)
 
     def updateSystemInfo(self, data):
         self.systemPlaintextEdit.clear()
@@ -65,6 +79,17 @@ class Window(QtWidgets.QWidget):
         self.servisePlaintextedit.clear()
         for i in data:
             self.servisePlaintextedit.appendPlainText(str(i))
+
+    def updateTaskInfo(self, data):
+        self.tasksPlaintextEdit.clear()
+        for i in data:
+            self.tasksPlaintextEdit.appendPlainText(str(i))
+
+    def onSpinBoxValueChanged(self, value):
+        self.systemInfoTread.delay = value
+        self.taskInfoThread.delay = value
+        self.serviceInfoThread.delay = value
+        self.taskInfoThread.delay = value
 
 class SystemViewerTread(QtCore.QThread):
     systemInfoReceived = QtCore.Signal(dict)
@@ -108,6 +133,7 @@ class ProcessInfoThread(QtCore.QThread):
             self.processInfoReceived.emit(self.data)
             time.sleep(self.delay)
 
+
 class ServiceInfoThread(QtCore.QThread):
     serviceInfoReceived = QtCore.Signal(object)
 
@@ -123,6 +149,27 @@ class ServiceInfoThread(QtCore.QThread):
             self.data = psutil.win_service_iter()
             self.serviceInfoReceived.emit(self.data)
             time.sleep(self.delay)
+
+class TaskInfoThread(QtCore.QThread):
+    taskInfoReceived = QtCore.Signal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.delay = None
+
+    def run(self) -> None:
+        if self.delay is None:
+            self.delay = 5
+
+        while True:
+            scheduler = win32com.client.Dispatch('Schedule.Service')
+            print(type(scheduler))
+            scheduler.Connect()
+            tasks = scheduler.GetRunningTasks(1)
+            names = [tasks.Item(i+1).Name for i in range(tasks.Count)]
+            self.taskInfoReceived.emit(names)
+            time.sleep(self.delay)
+
 
 if __name__ == "__main__":
 

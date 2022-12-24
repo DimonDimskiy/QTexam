@@ -1,5 +1,7 @@
 import psutil
-
+import platform
+import time
+import Py
 from PySide6 import QtWidgets, QtCore
 
 
@@ -8,37 +10,123 @@ class Window(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
+        self.initThreads()
         self.initUi()
+        self.initSignals()
 
-    def initUI(self):
+    def initSignals(self):
+        self.systemInfoTread.systemInfoReceived.connect(self.updateSystemInfo)
+        self.processInfoThread.processInfoReceived.connect(self.updateProcessInfo)
+        self.serviceInfoThread.serviceInfoReceived.connect(self.updateServiceInfo)
+
+    def initThreads(self):
+        self.systemInfoTread = SystemViewerTread()
+        self.systemInfoTread.start()
+        self.processInfoThread = ProcessInfoThread()
+        self.processInfoThread.start()
+        self.serviceInfoThread = ServiceInfoThread()
+        self.serviceInfoThread.start()
+
+    def initUi(self):
         """
 
         """
         self.systemPlaintextEdit = QtWidgets.QPlainTextEdit()
-        self.cpuNameLabel = QtWidgets.QLabel("Название процессора:")
-        self.cpuLogicCoresLabel = QtWidgets.QLabel(f"Логических ядер:{psutil.cpu_count(logical=True)}")
-        self.cpuPhysicCoresLabel = QtWidgets.QLabel(f"Физических ядер:{psutil.cpu_count(logical=False)}")
-        self.cpuLoadLabel = QtWidgets.QLabel(f"Загрузка процессора:{psutil.cpu_percent()} %")
-        self.ramInfoLabel = QtWidgets.QLabel("Оперативной памяти:")
-        self.ramLoadLabel = QtWidgets.QLabel("Использовано памяти:")
-        self.diskCountLabel = QtWidgets.QLabel("Количество дисков:")
+        self.systemPlaintextEdit.setReadOnly(True)
+        self.proccesPlaintextEdit = QtWidgets.QPlainTextEdit()
+        self.proccesPlaintextEdit.setReadOnly(True)
+        self.servisePlaintextedit = QtWidgets.QPlainTextEdit()
+        self.servisePlaintextedit.setReadOnly(True)
+        self.tasksPlaintextEdit = QtWidgets.QPlainTextEdit()
 
+        self.tabWidget = QtWidgets.QTabWidget()
+        self.tabWidget.addTab(self.systemPlaintextEdit, 'Система')
+        self.tabWidget.addTab(self.proccesPlaintextEdit, 'Процессы')
+        self.tabWidget.addTab(self.servisePlaintextedit, 'Службы')
+        self.tabWidget.addTab(self.tasksPlaintextEdit, 'Задачи')
+
+
+        mainLayout = QtWidgets.QVBoxLayout()
+        mainLayout.addWidget(self.tabWidget)
+
+        self.setLayout(mainLayout)
+
+    def updateSystemInfo(self, data):
+        self.systemPlaintextEdit.clear()
+        for i in data:
+            self.systemPlaintextEdit.appendPlainText(f"{i} {data[i]}")
+
+    def updateProcessInfo(self, data):
+        self.proccesPlaintextEdit.clear()
+        for i in data:
+            self.proccesPlaintextEdit.appendPlainText(str(i.info))
+
+    def updateServiceInfo(self, data):
+        self.servisePlaintextedit.clear()
+        for i in data:
+            self.servisePlaintextedit.appendPlainText(str(i))
 
 class SystemViewerTread(QtCore.QThread):
-    systemInfoReceived = QtCore.Signal()
+    systemInfoReceived = QtCore.Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.data = {}
         self.delay = None
+
+    def run(self) -> None:
+        if self.delay is None:
+            self.delay = 1
         while True:
-            self.data["Название процессора:"] = psutil
+            self.data["Название процессора:"] = platform.processor()
             self.data["Логических ядер:"] = psutil.cpu_count(logical=True)
             self.data["Физических ядер:"] = psutil.cpu_count(logical=False)
             self.data["Загрузка процессора, %:"] = psutil.cpu_percent()
-            self.data["Оперативной памяти:"] =
-            ram_value =
-            self.systemSignal  # TODO с помощью метода .emit передайте в виде списка данные о загрузке CPU и RAM
-            time}
+            self.data["Оперативной памяти, Гб:"] = round(psutil.virtual_memory().total/1073741824, 2)
+            self.data["Использованопамяти, %:"] = psutil.virtual_memory().percent
+            self.data["Количество дисков:"] = len(psutil.disk_partitions())
+            pathes = [i.mountpoint for i in psutil.disk_partitions()]
+            self.data["Всего/использовано, Гб/Гб"] = \
+                [f"{round(psutil.disk_usage(i).total/1073741824, 2)}/{round(psutil.disk_usage(i).used/1073741824, 2)}" for i in pathes]
+            self.systemInfoReceived.emit(self.data)
+            time.sleep(self.delay)
 
-print(psutil.cpu_stats())
+
+class ProcessInfoThread(QtCore.QThread):
+    processInfoReceived = QtCore.Signal(object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.data = None
+        self.delay = None
+
+    def run(self) -> None:
+        if self.delay is None:
+            self.delay = 1
+        while True:
+            self.data = psutil.process_iter(['pid', 'name', 'username'])
+            self.processInfoReceived.emit(self.data)
+            time.sleep(self.delay)
+
+class ServiceInfoThread(QtCore.QThread):
+    serviceInfoReceived = QtCore.Signal(object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.data = None
+        self.delay = None
+
+    def run(self) -> None:
+        if self.delay is None:
+            self.delay = 1
+        while True:
+            self.data = psutil.win_service_iter()
+            self.serviceInfoReceived.emit(self.data)
+            time.sleep(self.delay)
+
+if __name__ == "__main__":
+
+    app = QtWidgets.QApplication()
+    window = Window()
+    window.show()
+    app.exec()
